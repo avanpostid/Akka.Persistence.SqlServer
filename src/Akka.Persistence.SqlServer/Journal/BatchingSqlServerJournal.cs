@@ -9,6 +9,8 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Data;
 using System.Data.SqlClient;
+using System.Threading.Tasks;
+using Akka.Actor;
 using Akka.Configuration;
 using Akka.Persistence.Sql.Common.Journal;
 
@@ -48,6 +50,8 @@ namespace Akka.Persistence.SqlServer.Journal
 
     public class BatchingSqlServerJournal : BatchingSqlJournal<SqlConnection, SqlCommand>
     {
+        private readonly QueryConfiguration _conventions;
+
         public BatchingSqlServerJournal(Config config) : this(new BatchingSqlServerJournalSetup(config))
         {
             var c = Setup.NamingConventions;
@@ -68,6 +72,42 @@ namespace Akka.Persistence.SqlServer.Journal
              WHERE e.{c.OrderingColumnName} > @Ordering AND e.{c.TagsColumnName} LIKE @Tag_sized
              ORDER BY {c.OrderingColumnName} ASC
              ";
+            _conventions = c;
+        }
+
+        protected override string AllPersistenceIdsSql => $@"
+                SELECT DISTINCT PersistenceId 
+                FROM {_conventions.FullJournalTableName} e
+                WHERE e.{_conventions.OrderingColumnName} > @Ordering";
+
+        protected override string HighestSequenceNrSql => $@"
+                SELECT MAX(e.SequenceNr) as SequenceNr 
+                FROM {_conventions.FullJournalTableName} e 
+                WHERE e.{_conventions.PersistenceIdColumnName} = @PersistenceId";
+
+        protected override string DeleteBatchSql => $@"
+                DELETE FROM {_conventions.FullJournalTableName}
+                WHERE {_conventions.PersistenceIdColumnName} = @PersistenceId AND {_conventions.SequenceNrColumnName} <= @ToSequenceNr;";
+
+        protected override async Task HandleDeleteMessagesTo(DeleteMessagesTo req, SqlCommand command)
+        {
+            var toSequenceNr = req.ToSequenceNr;
+            var persistenceId = req.PersistenceId;
+            try
+            {
+                command.CommandText = DeleteBatchSql;
+                command.Parameters.Clear();
+                AddParameter(command, "@PersistenceId", DbType.String, persistenceId);
+                AddParameter(command, "@ToSequenceNr", DbType.Int64, toSequenceNr);
+                await command.ExecuteNonQueryAsync();
+                var response = new DeleteMessagesSuccess(toSequenceNr);
+                req.PersistentActor.Tell(response);
+            }
+            catch (Exception cause)
+            {
+                var response = new DeleteMessagesFailure(cause, toSequenceNr);
+                req.PersistentActor.Tell(response, null);
+            }
         }
 
         public BatchingSqlServerJournal(BatchingSqlServerJournalSetup setup) : base(setup)
@@ -87,6 +127,7 @@ namespace Akka.Persistence.SqlServer.Journal
                     connectionTimeoutSeconds, commandTimeout.TotalSeconds,
                     circuitBreakerTimeout.TotalSeconds);
             }
+
             var c = Setup.NamingConventions;
             Initializers = ImmutableDictionary.CreateRange(new Dictionary<string, string>
             {
@@ -131,7 +172,7 @@ namespace Akka.Persistence.SqlServer.Journal
                     );
                 END"
             });
-            
+
         }
 
         protected override string ByTagSql { get; }

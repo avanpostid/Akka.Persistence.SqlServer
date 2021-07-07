@@ -122,6 +122,8 @@ namespace Akka.Persistence.SqlServer.Journal
                 DELETE FROM {_conventions.FullJournalTableName}
                 WHERE {_conventions.PersistenceIdColumnName} = @PersistenceId AND {_conventions.SequenceNrColumnName} <= @ToSequenceNr;";
 
+        protected override string UpdateSequenceNrSql => "";
+
         protected override async Task HandleDeleteMessagesTo(DeleteMessagesTo req, SqlCommand command)
         {
             var toSequenceNr = req.ToSequenceNr;

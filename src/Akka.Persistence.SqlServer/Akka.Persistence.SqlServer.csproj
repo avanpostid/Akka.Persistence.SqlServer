@@ -8,7 +8,7 @@
     <TargetFramework>$(NetStandardLibVersion)</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <PackageVersion>1.4.16</PackageVersion>
+    <PackageVersion>1.4.18.2</PackageVersion>
   </PropertyGroup>
 
   <ItemGroup>
